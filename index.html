@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>日付範囲コピー（完全版・色固定）</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; display: flex; justify-content: center; }
+        .container { width: 380px; max-width: 100%; border: 1px solid #ccc; padding: 20px; border-radius: 8px; background: #f9f9f9; }
+        label { display: block; margin-top: 10px; font-weight: bold; }
+        input { width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box; }
+        button { width: 100%; margin-top: 20px; padding: 12px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+        button:hover { background: #218838; }
+        #status { margin-top: 10px; color: #007bff; font-weight: bold; text-align: center; height: 1.2em; }
+        h3, h4 { margin: 10px 0; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h3>日付範囲コピー（色固定版）</h3>
+    <p style="font-size: 0.8em; color: #666;">Excelに貼り付けると色付きで反映されます</p>
+
+    <label>開始日</label>
+    <input type="date" id="startDate">
+
+    <label>終了日</label>
+    <input type="date" id="endDate">
+
+    <h4 style="margin-top:20px;">日数カウンター</h4>
+    <div id="counter" style="font-size: 0.9em; color:#444;"></div>
+
+    <button id="copyBtn">Excel形式でコピー</button>
+    <div id="status"></div>
+</div>
+
+<script>
+    // ===== ユーティリティ =====
+    function toISO(date) {
+        return date.toISOString().split("T")[0];
+    }
+
+    function getDateRange(start, end) {
+        const arr = [];
+        const cur = new Date(start);
+        while (cur <= end) {
+            arr.push(new Date(cur));
+            cur.setDate(cur.getDate() + 1);
+        }
+        return arr;
+    }
+
+    // ===== 祝日計算 =====
+    function calcEquinox(year) {
+        const spring = Math.floor(20.8431 + 0.242194 * (year - 1980)) - Math.floor((year - 1980) / 4);
+        const autumn = Math.floor(23.2488 + 0.242194 * (year - 1980)) - Math.floor((year - 1980) / 4);
+        return {
+            spring: `${year}-03-${String(spring).padStart(2, "0")}`,
+            autumn: `${year}-09-${String(autumn).padStart(2, "0")}`
+        };
+    }
+
+    function nthMonday(year, month, nth) {
+        const d = new Date(year, month - 1, 1);
+        let count = 0;
+        while (true) {
+            if (d.getDay() === 1) count++;
+            if (count === nth) break;
+            d.setDate(d.getDate() + 1);
+        }
+        return toISO(d);
+    }
+
+    function getHolidaysForYear(year) {
+        const eq = calcEquinox(year);
+        return new Set([
+            `${year}-01-01`,
+            nthMonday(year, 1, 2),
+            `${year}-02-11`,
+            `${year}-02-23`,
+            eq.spring,
+            `${year}-04-29`,
+            `${year}-05-03`,
+            `${year}-05-04`,
+            `${year}-05-05`,
+            `${year}-05-06`,
+            nthMonday(year, 7, 3),
+            `${year}-08-11`,
+            nthMonday(year, 9, 3),
+            eq.autumn,
+            nthMonday(year, 10, 2),
+            `${year}-11-03`,
+            `${year}-11-23`
+        ]);
+    }
+
+    function getHolidaySet(start, end) {
+        const set = new Set();
+        for (let y = start.getFullYear(); y <= end.getFullYear(); y++) {
+            for (const h of getHolidaysForYear(y)) set.add(h);
+        }
+        return set;
+    }
+
+    // ===== 日数カウンター =====
+    function updateCounter() {
+        const s = new Date(document.getElementById('startDate').value);
+        const e = new Date(document.getElementById('endDate').value);
+        const el = document.getElementById('counter');
+
+        if (isNaN(s) || isNaN(e) || s > e) {
+            el.innerHTML = "正しい日付範囲を選択してください";
+            return;
+        }
+
+        const dates = getDateRange(s, e);
+        const holidays = getHolidaySet(s, e);
+
+        let total = 0, sat = 0, sun = 0, hol = 0;
+
+        for (const d of dates) {
+            total++;
+            const dow = d.getDay();
+            const iso = toISO(d);
+
+            if (holidays.has(iso)) hol++;
+            else if (dow === 0) sun++;
+            else if (dow === 6) sat++;
+        }
+
+        const weekday = total - sat - sun - hol;
+
+        el.innerHTML = `
+            総日数：${total}日<br>
+            平日：${weekday}日<br>
+            土曜：${sat}日 / 日曜：${sun}日 / 祝日：${hol}日
+        `;
+    }
+
+    // ===== コピー処理 =====
+    async function copyDates() {
+        const s = new Date(document.getElementById('startDate').value);
+        const e = new Date(document.getElementById('endDate').value);
+        const status = document.getElementById('status');
+
+        if (isNaN(s) || isNaN(e) || s > e) {
+            alert("正しい日付範囲を選択してください");
+            return;
+        }
+
+        const dates = getDateRange(s, e);
+        const holidays = getHolidaySet(s, e);
+
+        const colorHoliday = "#d4edda";
+        const colorSunday = "#f8d7da";
+        const colorSaturday = "#d1ecf1";
+
+        let html = `
+            <table style="border-collapse: collapse;">
+                <col style="width: 120px;">
+                <col style="width: 80px;">
+                <tr>
+                    <th style="border:1px solid #ccc;">日付</th>
+                    <th style="border:1px solid #ccc;">曜日</th>
+                </tr>
+        `;
+
+        let text = "日付\t曜日\n";
+        const youbi = ["日","月","火","水","木","金","土"];
+
+        for (const d of dates) {
+            const dow = d.getDay();
+            const iso = toISO(d);
+            const disp = d.toLocaleDateString("ja-JP");
+            const y = youbi[dow];
+
+            let bg = "#ffffff";
+            if (holidays.has(iso)) bg = colorHoliday;
+            else if (dow === 0) bg = colorSunday;
+            else if (dow === 6) bg = colorSaturday;
+
+            html += `
+                <tr>
+                    <td style="background:${bg}; border:1px solid #ccc;">${disp}</td>
+                    <td style="background:${bg}; border:1px solid #ccc;">${y}</td>
+                </tr>
+            `;
+            text += `${disp}\t${y}\n`;
+        }
+
+        html += "</table>";
+
+        const data = [
+            new ClipboardItem({
+                "text/html": new Blob([html], { type: "text/html" }),
+                "text/plain": new Blob([text], { type: "text/plain" })
+            })
+        ];
+
+        try {
+            await navigator.clipboard.write(data);
+            status.innerText = "コピー完了！Excelに貼り付けてください";
+            setTimeout(() => status.innerText = "", 3000);
+        } catch (e) {
+            alert("コピーに失敗しました。ブラウザの権限を確認してください。");
+        }
+    }
+
+    // ===== 初期化 =====
+    (function init() {
+        const today = new Date().toISOString().split('T')[0];
+        document.getElementById('startDate').value = today;
+        document.getElementById('endDate').value = today;
+
+        updateCounter();
+
+        document.getElementById('startDate').addEventListener("change", updateCounter);
+        document.getElementById('endDate').addEventListener("change", updateCounter);
+        document.getElementById('copyBtn').addEventListener("click", copyDates);
+    })();
+</script>
+
+</body>
+</html>
